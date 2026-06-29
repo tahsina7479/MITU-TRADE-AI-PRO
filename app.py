@@ -1,6 +1,6 @@
-# MITU TRADE AI PROFESSIONAL TERMINAL V22
+# MITU TRADE AI PROFESSIONAL TERMINAL V23
 # Full app.py replacement. Paper trading only.
-# V22 upgrades: optional live Yahoo Finance data, real RSI/MACD/EMA indicators,
+# V23 upgrades: optional live Yahoo Finance data, real RSI/MACD/EMA indicators,
 # session weighting, safer journal, improved ranking, and fallback prices.
 
 import os
@@ -16,9 +16,10 @@ try:
 except Exception:
     yf = None
 
-st.set_page_config(page_title="MITU TRADE AI V22", layout="wide")
+st.set_page_config(page_title="MITU TRADE AI V23", layout="wide")
 
-APP_VERSION = "V22"
+APP_VERSION = "V23"
+ML_DATA_FILE = "ml_training_data_v23.csv"
 JOURNAL_FILE = "trade_journal.csv"
 
 SYMBOLS = [
@@ -222,7 +223,7 @@ def make_signal(row, scan_timeframe, live_data, forex_session, stock_status):
     boost, session_reason = session_score_boost(market, pair, forex_session, stock_status)
     score += boost
 
-    # V22 safety: avoid fake-perfect 100 scores and reduce weak extreme RSI setups.
+    # V23 safety: avoid fake-perfect 100 scores and reduce weak extreme RSI setups.
     if rsi > 75 or rsi < 25:
         score -= 10
     if not mtf_agree:
@@ -235,7 +236,7 @@ def make_signal(row, scan_timeframe, live_data, forex_session, stock_status):
     if rsi <= 45: sell_score += 25
     if mtf_agree and tf_5m == "SELL": sell_score += 15
 
-    # V22 safety: avoid fake-perfect 100 sell scores and reduce oversold chase.
+    # V23 safety: avoid fake-perfect 100 sell scores and reduce oversold chase.
     if rsi < 25:
         sell_score -= 10
     if not mtf_agree:
@@ -301,7 +302,7 @@ def make_signal(row, scan_timeframe, live_data, forex_session, stock_status):
         "Risk Level": risk,
         "Trade Quality": quality,
         "Action Plan": action,
-        "V22 Multi-Timeframe": mtf_text,
+        "V23 Multi-Timeframe": mtf_text,
         "MTF Agree": mtf_agree,
         "Session Reason": session_reason,
         "Data Source": data_source,
@@ -538,8 +539,78 @@ def build_journal_equity_curve(journal):
     return closed[["Trade Number", "Pair", "Type", "Profit/Loss", "Cumulative P/L", "Result"]]
 
 
+def save_ml_snapshot(scanner, scan_timeframe, forex_session, stock_status):
+    """
+    V23 ML-ready dataset collector.
+    It saves each scanner row with timestamp and features.
+    Later we can add real outcome labels: WIN / LOSS / BREAKEVEN.
+    """
+    if scanner.empty:
+        return False, "No scanner data to save."
+
+    keep_cols = [
+        "Market", "Pair", "Display Pair", "Price", "Change %", "RSI", "EMA20", "EMA50",
+        "Trend", "MACD", "MACD Value", "Signal", "Type", "Confidence", "Score",
+        "Probability %", "AI Grade", "Risk Level", "Trade Quality", "MTF Agree",
+        "Session Reason", "Data Source", "Entry", "Stop Loss", "Take Profit"
+    ]
+
+    df = scanner.copy()
+    for col in keep_cols:
+        if col not in df.columns:
+            df[col] = np.nan
+
+    mtf_col = f"{APP_VERSION} Multi-Timeframe"
+    if mtf_col in df.columns:
+        df["Multi-Timeframe"] = df[mtf_col]
+    else:
+        df["Multi-Timeframe"] = ""
+
+    dataset = df[keep_cols + ["Multi-Timeframe"]].copy()
+    dataset.insert(0, "Timestamp", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    dataset.insert(1, "Version", APP_VERSION)
+    dataset.insert(2, "Scan Timeframe", scan_timeframe)
+    dataset.insert(3, "Forex Session", forex_session)
+    dataset.insert(4, "Stock Status", stock_status)
+
+    # Future label columns for machine learning.
+    dataset["Future Result"] = ""
+    dataset["Future Return %"] = np.nan
+    dataset["Label Ready"] = "NO"
+
+    old = pd.read_csv(ML_DATA_FILE) if os.path.exists(ML_DATA_FILE) else pd.DataFrame()
+    pd.concat([old, dataset], ignore_index=True).to_csv(ML_DATA_FILE, index=False)
+    return True, f"Saved {len(dataset)} rows to {ML_DATA_FILE}."
+
+
+def load_ml_dataset():
+    if not os.path.exists(ML_DATA_FILE):
+        return pd.DataFrame()
+    try:
+        return pd.read_csv(ML_DATA_FILE)
+    except Exception:
+        return pd.DataFrame()
+
+
+def ml_readiness_score(dataset):
+    if dataset.empty:
+        return 0, "No ML dataset yet."
+    rows = len(dataset)
+    labeled = 0
+    if "Label Ready" in dataset.columns:
+        labeled = len(dataset[dataset["Label Ready"].astype(str).str.upper() == "YES"])
+    if rows >= 500 and labeled >= 200:
+        return 100, "Ready for first ML model."
+    if rows >= 200:
+        return 60, "Good data collection progress."
+    if rows >= 50:
+        return 35, "Early ML dataset started."
+    return 15, "Need more saved scanner snapshots."
+
+
+
 # Sidebar controls
-st.sidebar.header("⚙️ V22 Controls")
+st.sidebar.header("⚙️ V23 Controls")
 live_data = st.sidebar.checkbox("Use Yahoo Finance Live Data", value=True)
 auto_refresh = st.sidebar.checkbox("Auto Refresh Mode")
 refresh_every = st.sidebar.selectbox("Refresh Every", [5, 15, 30, 60], index=1)
@@ -550,9 +621,9 @@ scan_timeframe = st.sidebar.selectbox("Scan Timeframe", ["5m","15m","1h","1d"], 
 if auto_refresh:
     st.sidebar.info(f"Auto refresh selected: {refresh_every} seconds. Click refresh button for manual refresh if browser does not auto-refresh.")
 
-st.title("🚀 MITU TRADE AI PROFESSIONAL TERMINAL V22")
-st.write("V22: live Yahoo Finance data option, real RSI/MACD/EMA signals, session weighting, improved ranking, paper journal, risk manager, and basic backtest panel.")
-st.success("✅ V22 active: Live Data + Real Indicators + Session Boost + Safer Paper Trading")
+st.title("🚀 MITU TRADE AI PROFESSIONAL TERMINAL V23")
+st.write("V23: live Yahoo Finance data option, real RSI/MACD/EMA signals, session weighting, improved ranking, paper journal, risk manager, and basic backtest panel.")
+st.success("✅ V23 active: Live Data + Real Indicators + Session Boost + Safer Paper Trading")
 
 if yf is None and live_data:
     st.error("yfinance is not installed. Run this in terminal: pip install yfinance")
@@ -587,15 +658,15 @@ c2.metric("Forex Session", forex_session)
 c3.metric("Stocks", stock_status)
 c4.metric("Scan Timeframe", scan_timeframe)
 
-st.subheader("⚡ V22 AI Market Priority")
+st.subheader("⚡ V23 AI Market Priority")
 p1, p2, p3, p4 = st.columns(4)
 p1.metric("Forex Priority", "High" if forex_session != "Quiet / Watchlist" else "Watchlist")
 p2.metric("Gold Priority", "High" if forex_session in ["London session", "New York session"] else "Medium")
 p3.metric("Crypto Priority", "24/7 Active")
 p4.metric("Stocks Priority", "Active" if stock_status == "Stocks open" else "Closed / Watchlist")
-st.caption("V22 rule: paper trading only. Use session timing + TradingView chart confirmation before opening any trade.")
+st.caption("V23 rule: paper trading only. Use session timing + TradingView chart confirmation before opening any trade.")
 
-st.subheader("📰 V22 News Risk Reminder")
+st.subheader("📰 V23 News Risk Reminder")
 n1, n2, n3, n4 = st.columns(4)
 n1.metric("USD News Risk", "Check Calendar")
 n2.metric("Gold News Risk", "USD Sensitive")
@@ -603,13 +674,13 @@ n3.metric("Forex News Risk", "Medium")
 n4.metric("Crypto News Risk", "24/7 Volatile")
 st.warning("Before paper trading, check high-impact news: CPI, NFP, FOMC, interest rates, GDP, unemployment.")
 
-st.subheader("🧠 V22 Signal Engine")
+st.subheader("🧠 V23 Signal Engine")
 e1, e2, e3, e4 = st.columns(4)
 e1.metric("Trend Filter", "EMA 20/50")
 e2.metric("Momentum Filter", "RSI + MACD")
 e3.metric("MTF Check", "5m / 15m / 1h")
 e4.metric("Data", "Yahoo Live" if live_data and yf is not None else "Fallback Demo")
-st.info("V22 uses live candles when yfinance works. If Yahoo data fails, it safely falls back to demo prices.")
+st.info("V23 uses live candles when yfinance works. If Yahoo data fails, it safely falls back to demo prices.")
 
 st.write("Total symbols in list:", len(SYMBOLS))
 st.write("Total results found:", len(scanner))
@@ -637,7 +708,7 @@ Risk/Reward: {rr_ratio(best['Entry'], best['Stop Loss'], best['Take Profit'])}
 Risk Amount: ${risk_amount}
 Position Size: {size}
 Position Value: ${value}
-Multi-Timeframe: {best['V22 Multi-Timeframe']}"""
+Multi-Timeframe: {best['V23 Multi-Timeframe']}"""
     st.success(best_text)
 
     st.subheader("🧠 AI Analyst Explanation")
@@ -647,7 +718,7 @@ Multi-Timeframe: {best['V22 Multi-Timeframe']}"""
         f"Score: {best['Score']} | Probability: {best['Probability %']}% | Grade: {best['AI Grade']}\n"
         f"Risk Level: {best['Risk Level']} | Trade Quality: {best['Trade Quality']}\n"
         f"Action Plan: {best['Action Plan']}\n"
-        f"Multi-Timeframe: {best['V22 Multi-Timeframe']}\n"
+        f"Multi-Timeframe: {best['V23 Multi-Timeframe']}\n"
         f"Technical Reason: EMA trend {best['Trend']}. MACD {best['MACD']} ({best['MACD Value']}). RSI {best['RSI']}. "
         f"Session reason: {best['Session Reason']}. Data source: {best['Data Source']}."
     )
@@ -675,7 +746,7 @@ for market in markets:
         st.info("No results")
     for _, r in mdf.iterrows():
         color = "🟢" if r["Score"] >= 85 else "🟡" if r["Score"] >= 65 else "🔵"
-        st.write(f"{color} {r['Pair']} | {r['Signal']} | Score: {r['Score']} | Probability: {r['Probability %']}% | Grade: {r['AI Grade']} | Risk: {r['Risk Level']} | Entry: {r['Entry']} | SL: {r['Stop Loss']} | TP: {r['Take Profit']} | MTF: {r['V22 Multi-Timeframe']} | Source: {r['Data Source']}")
+        st.write(f"{color} {r['Pair']} | {r['Signal']} | Score: {r['Score']} | Probability: {r['Probability %']}% | Grade: {r['AI Grade']} | Risk: {r['Risk Level']} | Entry: {r['Entry']} | SL: {r['Stop Loss']} | TP: {r['Take Profit']} | MTF: {r['V23 Multi-Timeframe']} | Source: {r['Data Source']}")
 
 st.subheader("💾 Open Best Trade in Journal")
 if best is not None and st.button("Open Overall Best Trade"):
@@ -715,7 +786,7 @@ if os.path.exists(JOURNAL_FILE):
     journal = pd.read_csv(JOURNAL_FILE)
     st.write("Journal rows:", len(journal))
     st.dataframe(journal, use_container_width=True)
-    st.download_button("⬇️ Download Trade Journal CSV", journal.to_csv(index=False), "trade_journal_v21.csv", "text/csv")
+    st.download_button("⬇️ Download Trade Journal CSV", journal.to_csv(index=False), "trade_journal_v23.csv", "text/csv")
     closed = journal[journal["Status"] == "CLOSED"] if "Status" in journal.columns else pd.DataFrame()
     st.subheader("📊 Journal Win Rate")
     j1, j2, j3, j4 = st.columns(4)
@@ -767,7 +838,7 @@ for market in markets:
     c2.metric("Bearish", len(mdf[mdf["Signal"].isin(["STRONG SELL", "SELL WATCH"])]))
     c3.metric("Neutral / Mixed", len(mdf[mdf["Signal"] == "WAIT"]))
 
-st.subheader("🧪 V22 Realistic Backtest Panel")
+st.subheader("🧪 V23 Realistic Backtest Panel")
 backtest = build_realistic_backtest(scanner, scan_timeframe, live_data)
 
 if not backtest.empty:
@@ -802,13 +873,43 @@ if not backtest.empty:
 else:
     st.info("No backtest data available.")
 
-st.subheader("📌 V22 Market Strength Ranking")
-ranking_cols = ["Market", "Confidence Stars", "Pair", "Display Pair", "Signal", "Score", "Probability %", "AI Grade", "Risk Level", "Trade Quality", "Action Plan", "V22 Multi-Timeframe", "Session Reason", "Data Source"]
+st.subheader("📌 V23 Market Strength Ranking")
+ranking_cols = ["Market", "Confidence Stars", "Pair", "Display Pair", "Signal", "Score", "Probability %", "AI Grade", "Risk Level", "Trade Quality", "Action Plan", "V23 Multi-Timeframe", "Session Reason", "Data Source"]
 st.dataframe(scanner[ranking_cols], use_container_width=True)
-st.download_button("⬇️ Download Scanner Results CSV", scanner.to_csv(index=False), "scanner_results_v21.csv", "text/csv")
+st.download_button("⬇️ Download Scanner Results CSV", scanner.to_csv(index=False), "scanner_results_v23.csv", "text/csv")
 
-st.subheader("📊 V22 Market Scanner Results")
-display_cols = ["Market", "Pair", "Display Pair", "Price", "Change %", "RSI", "EMA20", "EMA50", "Trend", "MACD", "MACD Value", "Signal", "Type", "Confidence", "Score", "Probability %", "AI Grade", "Confidence Stars", "Trade Quality", "Action Plan", "V22 Multi-Timeframe", "Entry", "Stop Loss", "Take Profit", "Data Source"]
+st.subheader("📊 V23 Market Scanner Results")
+display_cols = ["Market", "Pair", "Display Pair", "Price", "Change %", "RSI", "EMA20", "EMA50", "Trend", "MACD", "MACD Value", "Signal", "Type", "Confidence", "Score", "Probability %", "AI Grade", "Confidence Stars", "Trade Quality", "Action Plan", "V23 Multi-Timeframe", "Entry", "Stop Loss", "Take Profit", "Data Source"]
 st.dataframe(scanner[display_cols], use_container_width=True)
 
-st.warning("Paper trading only. Do not use real money yet. V22 signals are educational and must be confirmed manually on chart.")
+st.subheader("🤖 V23 Machine Learning Dataset Builder")
+st.info("V23 does not trade automatically. It collects clean scanner snapshots so we can train a model later from real paper-trade outcomes.")
+
+m1, m2, m3, m4 = st.columns(4)
+ml_df = load_ml_dataset()
+ready_score, ready_note = ml_readiness_score(ml_df)
+m1.metric("Saved ML Rows", len(ml_df))
+m2.metric("ML Readiness %", ready_score)
+m3.metric("Symbols This Scan", len(scanner))
+m4.metric("Version", APP_VERSION)
+
+st.caption(ready_note)
+
+if st.button("💾 Save Current Scanner Snapshot for ML"):
+    saved, msg = save_ml_snapshot(scanner, scan_timeframe, forex_session, stock_status)
+    if saved:
+        st.success(msg)
+        st.rerun()
+    else:
+        st.warning(msg)
+
+if not ml_df.empty:
+    st.download_button(
+        "⬇️ Download V23 ML Dataset CSV",
+        ml_df.to_csv(index=False),
+        "ml_training_data_v23.csv",
+        "text/csv",
+    )
+    st.dataframe(ml_df.tail(50), use_container_width=True)
+
+st.warning("Paper trading only. Do not use real money yet. V23 signals are educational and must be confirmed manually on chart.")
