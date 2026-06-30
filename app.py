@@ -1,7 +1,7 @@
-# MITU TRADE AI PROFESSIONAL TERMINAL V24
+# MITU TRADE AI PROFESSIONAL TERMINAL V25
 # Full app.py replacement. Paper trading only.
-# V24 upgrades: sidebar session assistant, limited professional watchlist,
-# AI Watchlist Now, Top Opportunities panel, Score Guide, and OANDA placeholder.
+# V25 upgrades: clean Apple-style layout, final trade decision near top,
+# quick sidebar signal, compact sections, improved trade quality labels.
 
 import os
 from datetime import datetime
@@ -16,14 +16,14 @@ try:
 except Exception:
     yf = None
 
-st.set_page_config(page_title="MITU TRADE AI V24", layout="wide")
+st.set_page_config(page_title="MITU TRADE AI V25", layout="wide")
 
-APP_VERSION = "V24"
-ML_DATA_FILE = "ml_training_data_v24.csv"
+APP_VERSION = "V25"
+ML_DATA_FILE = "ml_training_data_v25.csv"
 JOURNAL_FILE = "trade_journal.csv"
 
 SYMBOLS = [
-    # V24 LIMITED WATCHLIST: fewer instruments = better focus for paper trading.
+    # V25 LIMITED WATCHLIST: fewer instruments = better focus for paper trading.
     {"Market":"FOREX","Pair":"EURUSD=X","Display Pair":"EURUSD","Price":1.1390},
     {"Market":"FOREX","Pair":"GBPUSD=X","Display Pair":"GBPUSD","Price":1.3198},
     {"Market":"FOREX","Pair":"USDJPY=X","Display Pair":"USDJPY","Price":161.73},
@@ -95,8 +95,8 @@ def session_score_boost(market, pair, forex_session, stock_status):
     return 0, "Session not ideal"
 
 
-def v24_session_assistant(rows, ny_now, forex_session, stock_status):
-    """Return compact session guidance for the V24 sidebar."""
+def v25_session_assistant(rows, ny_now, forex_session, stock_status):
+    """Return compact session guidance for the V25 sidebar."""
     row_map = {r["Name"]: r for r in rows}
     london_open = bool(row_map.get("GB London", {}).get("Open", False))
     ny_stock_open = bool(row_map.get("US New York", {}).get("Open", False))
@@ -140,11 +140,24 @@ def v24_session_assistant(rows, ny_now, forex_session, stock_status):
     }
 
 
-def display_v24_sidebar_assistant(scanner, rows, ny_now, forex_session, stock_status):
-    info = v24_session_assistant(rows, ny_now, forex_session, stock_status)
+def display_v25_sidebar_assistant(scanner, rows, ny_now, forex_session, stock_status):
+    info = v25_session_assistant(rows, ny_now, forex_session, stock_status)
 
     st.sidebar.divider()
-    st.sidebar.subheader("🌍 V24 Session Assistant")
+    st.sidebar.subheader("🎯 QUICK SIGNAL")
+    if scanner.empty:
+        st.sidebar.info("No signal yet.")
+    else:
+        q = scanner.iloc[0]
+        if q["Type"] == "WAIT" or q["Score"] < 70:
+            st.sidebar.warning(f"WAIT\n\nBest: {q['Display Pair']}\n\nScore: {q['Score']}\n\nQuality: {q['Trade Quality']}")
+        elif q["Score"] >= 85:
+            st.sidebar.success(f"{q['Display Pair']}\n\n{q['Signal']}\n\nScore: {q['Score']}\n\n{q['Trade Quality']}")
+        else:
+            st.sidebar.info(f"{q['Display Pair']}\n\n{q['Signal']}\n\nScore: {q['Score']}\n\n{q['Trade Quality']}")
+
+    st.sidebar.divider()
+    st.sidebar.subheader("🌍 V25 Session Assistant")
     st.sidebar.write(f"New York: **{ny_now.strftime('%I:%M %p')}**")
     st.sidebar.write(f"Sydney: {'🟢' if info['Sydney'] else '🔴'} | Tokyo: {'🟢' if info['Tokyo'] else '🔴'}")
     st.sidebar.write(f"London: {'🟢' if info['London'] else '🔴'} | New York: {'🟢' if info['New York'] else '🔴'}")
@@ -176,15 +189,16 @@ def display_v24_sidebar_assistant(scanner, rows, ny_now, forex_session, stock_st
 
     st.sidebar.divider()
     st.sidebar.subheader("🧠 Score Guide")
-    st.sidebar.success("85-95 = Strong candidate")
-    st.sidebar.warning("70-84 = Watchlist only")
-    st.sidebar.error("0-69 = Ignore / wait")
+    st.sidebar.success("90-95 = Elite setup")
+    st.sidebar.info("80-89 = Strong setup")
+    st.sidebar.warning("70-79 = Good / watch")
+    st.sidebar.error("0-69 = Avoid / wait")
     st.sidebar.caption("Score is setup quality, not guaranteed win rate.")
 
     st.sidebar.divider()
     st.sidebar.subheader("🔗 OANDA Demo")
     st.sidebar.info("Status: Not connected yet")
-    st.sidebar.caption("Token পেলেই V25/V24.1-এ balance, equity, open trades দেখাবো.")
+    st.sidebar.caption("Token পেলেই V25/V25.1-এ balance, equity, open trades দেখাবো.")
 
 
 @st.cache_data(ttl=60, show_spinner=False)
@@ -346,6 +360,18 @@ def make_signal(row, scan_timeframe, live_data, forex_session, stock_status):
         signal, trade_type, quality = "WAIT", "WAIT", "NEUTRAL"
         final_score = max(score, sell_score)
 
+    # V25 clean trade quality badge
+    if final_score >= 95:
+        quality = "LEGENDARY"
+    elif final_score >= 90:
+        quality = "ELITE"
+    elif final_score >= 80:
+        quality = "STRONG"
+    elif final_score >= 70:
+        quality = "GOOD"
+    else:
+        quality = "AVOID"
+
     probability = min(92, max(35, round(final_score * 0.9 + (3 if live_data and tech is not None else 0), 1)))
     grade = "A+" if final_score >= 90 else "A" if final_score >= 80 else "B" if final_score >= 65 else "C" if final_score >= 45 else "D"
     stars = "⭐" * (5 if final_score >= 90 else 4 if final_score >= 80 else 3 if final_score >= 65 else 2 if final_score >= 45 else 1)
@@ -389,7 +415,7 @@ def make_signal(row, scan_timeframe, live_data, forex_session, stock_status):
         "Risk Level": risk,
         "Trade Quality": quality,
         "Action Plan": action,
-        "V24 Multi-Timeframe": mtf_text,
+        "V25 Multi-Timeframe": mtf_text,
         "MTF Agree": mtf_agree,
         "Session Reason": session_reason,
         "Data Source": data_source,
@@ -697,7 +723,7 @@ def ml_readiness_score(dataset):
 
 
 # Sidebar controls
-st.sidebar.header("⚙️ V24 Controls")
+st.sidebar.header("⚙️ V25 Controls")
 live_data = st.sidebar.checkbox("Use Yahoo Finance Live Data", value=True)
 auto_refresh = st.sidebar.checkbox("Auto Refresh Mode")
 refresh_every = st.sidebar.selectbox("Refresh Every", [5, 15, 30, 60], index=1)
@@ -708,9 +734,19 @@ scan_timeframe = st.sidebar.selectbox("Scan Timeframe", ["5m","15m","1h","1d"], 
 if auto_refresh:
     st.sidebar.info(f"Auto refresh selected: {refresh_every} seconds. Click refresh button for manual refresh if browser does not auto-refresh.")
 
-st.title("🚀 MITU TRADE AI PROFESSIONAL TERMINAL V24")
-st.write("V24: limited professional watchlist, sidebar session assistant, AI Watchlist Now, top opportunities, score guide, live Yahoo data option, paper journal, risk manager, ML dataset, and backtest panel.")
-st.success("✅ V24 active: Session Assistant + Limited Watchlist + AI Watchlist + Paper Trading")
+st.title("🚀 MITU TRADE AI V25")
+st.caption("Professional AI Paper Trading Dashboard — clean, focused, paper trading only.")
+st.success("✅ V25 active: Clean final decision card + quick signal + compact dashboard")
+
+st.markdown("""
+<style>
+.block-container {padding-top: 1.4rem; padding-bottom: 2rem;}
+div[data-testid="stMetric"] {background: rgba(250,250,250,0.04); border: 1px solid rgba(128,128,128,0.18); border-radius: 16px; padding: 12px;}
+.trade-card {border: 1px solid rgba(128,128,128,0.25); border-radius: 22px; padding: 24px; margin: 12px 0 18px 0; box-shadow: 0 6px 22px rgba(0,0,0,0.08);}
+.trade-card h2 {margin-top: 0;}
+.small-muted {opacity: 0.78; font-size: 0.95rem;}
+</style>
+""", unsafe_allow_html=True)
 
 if yf is None and live_data:
     st.error("yfinance is not installed. Run this in terminal: pip install yfinance")
@@ -730,10 +766,29 @@ if show_strong:
 scanner = scanner.reset_index(drop=True)
 best = scanner.iloc[0] if not scanner.empty else None
 
-# V24 sidebar assistant is shown after scanner is built, so it can display live top setups.
-display_v24_sidebar_assistant(scanner, rows, ny_now, forex_session, stock_status)
+# V25 sidebar assistant is shown after scanner is built, so it can display live top setups.
+display_v25_sidebar_assistant(scanner, rows, ny_now, forex_session, stock_status)
 
-st.subheader("🌍 World Market Clock + Session Status V24")
+st.subheader("🎯 FINAL TRADE DECISION")
+if best is not None:
+    size, risk_amount, value = position_size(balance, risk_pct, best["Entry"], best["Stop Loss"])
+    action_label = "PAPER TRADE" if best["Type"] != "WAIT" and best["Score"] >= 85 else "WAIT / WATCHLIST"
+    card_html = f"""
+    <div class="trade-card">
+        <h2>{'🔥 TRADE NOW' if action_label == 'PAPER TRADE' else '⚠️ NO ELITE SETUP FOUND'}</h2>
+        <h1>{best['Display Pair']} — {best['Signal']}</h1>
+        <p class="small-muted">Market: {best['Market']} | Data: {best['Data Source']} | Session: {best['Session Reason']}</p>
+        <h3>Score: {best['Score']} | Quality: {best['Trade Quality']} | Confidence: {best['Confidence Stars']}</h3>
+        <p><b>Action:</b> {action_label} only after TradingView chart confirmation.</p>
+        <p><b>Entry:</b> {best['Entry']} &nbsp; <b>SL:</b> {best['Stop Loss']} &nbsp; <b>TP:</b> {best['Take Profit']} &nbsp; <b>R/R:</b> {rr_ratio(best['Entry'], best['Stop Loss'], best['Take Profit'])}</p>
+    </div>
+    """
+    st.markdown(card_html, unsafe_allow_html=True)
+else:
+    size = 0
+    st.warning("No scanner results found. Try ALL focus mode or turn off strong-only filter.")
+
+st.subheader("🌍 World Market Clock + Session Status V25")
 for col, row in zip(st.columns(4), rows):
     with col:
         st.caption(row["Name"])
@@ -748,15 +803,15 @@ c2.metric("Forex Session", forex_session)
 c3.metric("Stocks", stock_status)
 c4.metric("Scan Timeframe", scan_timeframe)
 
-st.subheader("⚡ V24 AI Market Priority")
+st.subheader("⚡ V25 AI Market Priority")
 p1, p2, p3, p4 = st.columns(4)
 p1.metric("Forex Priority", "High" if forex_session != "Quiet / Watchlist" else "Watchlist")
 p2.metric("Gold Priority", "High" if forex_session in ["London session", "New York session"] else "Medium")
 p3.metric("Crypto Priority", "24/7 Active")
 p4.metric("Stocks Priority", "Active" if stock_status == "Stocks open" else "Closed / Watchlist")
-st.caption("V24 rule: paper trading only. Use session timing + score guide + TradingView chart confirmation before opening any trade.")
+st.caption("V25 rule: paper trading only. Use session timing + score guide + TradingView chart confirmation before opening any trade.")
 
-st.subheader("📰 V24 News Risk Reminder")
+st.subheader("📰 V25 News Risk Reminder")
 n1, n2, n3, n4 = st.columns(4)
 n1.metric("USD News Risk", "Check Calendar")
 n2.metric("Gold News Risk", "USD Sensitive")
@@ -764,20 +819,20 @@ n3.metric("Forex News Risk", "Medium")
 n4.metric("Crypto News Risk", "24/7 Volatile")
 st.warning("Before paper trading, check high-impact news: CPI, NFP, FOMC, interest rates, GDP, unemployment.")
 
-st.subheader("🧠 V24 Signal Engine")
+st.subheader("🧠 V25 Signal Engine")
 e1, e2, e3, e4 = st.columns(4)
 e1.metric("Trend Filter", "EMA 20/50")
 e2.metric("Momentum Filter", "RSI + MACD")
 e3.metric("MTF Check", "5m / 15m / 1h")
 e4.metric("Data", "Yahoo Live" if live_data and yf is not None else "Fallback Demo")
-st.info("V24 uses live candles when yfinance works. If Yahoo data fails, it safely falls back to demo prices.")
+st.info("V25 uses live candles when yfinance works. If Yahoo data fails, it safely falls back to demo prices.")
 
 st.write("Total symbols in list:", len(SYMBOLS))
 st.write("Total results found:", len(scanner))
 
 if best is not None:
     size, risk_amount, value = position_size(balance, risk_pct, best["Entry"], best["Stop Loss"])
-    st.subheader("🔥 Overall Best Trade")
+    st.subheader("📋 Trade Details")
     best_text = f"""BEST TRADE NOW: {best['Pair']} ({best['Market']})
 
 Signal: {best['Signal']}
@@ -798,7 +853,7 @@ Risk/Reward: {rr_ratio(best['Entry'], best['Stop Loss'], best['Take Profit'])}
 Risk Amount: ${risk_amount}
 Position Size: {size}
 Position Value: ${value}
-Multi-Timeframe: {best['V24 Multi-Timeframe']}"""
+Multi-Timeframe: {best['V25 Multi-Timeframe']}"""
     st.success(best_text)
 
     st.subheader("🧠 AI Analyst Explanation")
@@ -808,7 +863,7 @@ Multi-Timeframe: {best['V24 Multi-Timeframe']}"""
         f"Score: {best['Score']} | Probability: {best['Probability %']}% | Grade: {best['AI Grade']}\n"
         f"Risk Level: {best['Risk Level']} | Trade Quality: {best['Trade Quality']}\n"
         f"Action Plan: {best['Action Plan']}\n"
-        f"Multi-Timeframe: {best['V24 Multi-Timeframe']}\n"
+        f"Multi-Timeframe: {best['V25 Multi-Timeframe']}\n"
         f"Technical Reason: EMA trend {best['Trend']}. MACD {best['MACD']} ({best['MACD Value']}). RSI {best['RSI']}. "
         f"Session reason: {best['Session Reason']}. Data source: {best['Data Source']}."
     )
@@ -836,7 +891,7 @@ for market in markets:
         st.info("No results")
     for _, r in mdf.iterrows():
         color = "🟢" if r["Score"] >= 85 else "🟡" if r["Score"] >= 65 else "🔵"
-        st.write(f"{color} {r['Pair']} | {r['Signal']} | Score: {r['Score']} | Probability: {r['Probability %']}% | Grade: {r['AI Grade']} | Risk: {r['Risk Level']} | Entry: {r['Entry']} | SL: {r['Stop Loss']} | TP: {r['Take Profit']} | MTF: {r['V24 Multi-Timeframe']} | Source: {r['Data Source']}")
+        st.write(f"{color} {r['Pair']} | {r['Signal']} | Score: {r['Score']} | Probability: {r['Probability %']}% | Grade: {r['AI Grade']} | Risk: {r['Risk Level']} | Entry: {r['Entry']} | SL: {r['Stop Loss']} | TP: {r['Take Profit']} | MTF: {r['V25 Multi-Timeframe']} | Source: {r['Data Source']}")
 
 st.subheader("💾 Open Best Trade in Journal")
 if best is not None and st.button("Open Overall Best Trade"):
@@ -876,7 +931,7 @@ if os.path.exists(JOURNAL_FILE):
     journal = pd.read_csv(JOURNAL_FILE)
     st.write("Journal rows:", len(journal))
     st.dataframe(journal, use_container_width=True)
-    st.download_button("⬇️ Download Trade Journal CSV", journal.to_csv(index=False), "trade_journal_v24.csv", "text/csv")
+    st.download_button("⬇️ Download Trade Journal CSV", journal.to_csv(index=False), "trade_journal_v25.csv", "text/csv")
     closed = journal[journal["Status"] == "CLOSED"] if "Status" in journal.columns else pd.DataFrame()
     st.subheader("📊 Journal Win Rate")
     j1, j2, j3, j4 = st.columns(4)
@@ -928,7 +983,7 @@ for market in markets:
     c2.metric("Bearish", len(mdf[mdf["Signal"].isin(["STRONG SELL", "SELL WATCH"])]))
     c3.metric("Neutral / Mixed", len(mdf[mdf["Signal"] == "WAIT"]))
 
-st.subheader("🧪 V24 Realistic Backtest Panel")
+st.subheader("🧪 V25 Realistic Backtest Panel")
 backtest = build_realistic_backtest(scanner, scan_timeframe, live_data)
 
 if not backtest.empty:
@@ -963,17 +1018,17 @@ if not backtest.empty:
 else:
     st.info("No backtest data available.")
 
-st.subheader("📌 V24 Market Strength Ranking")
-ranking_cols = ["Market", "Confidence Stars", "Pair", "Display Pair", "Signal", "Score", "Probability %", "AI Grade", "Risk Level", "Trade Quality", "Action Plan", "V24 Multi-Timeframe", "Session Reason", "Data Source"]
+st.subheader("📌 V25 Market Strength Ranking")
+ranking_cols = ["Market", "Confidence Stars", "Pair", "Display Pair", "Signal", "Score", "Probability %", "AI Grade", "Risk Level", "Trade Quality", "Action Plan", "V25 Multi-Timeframe", "Session Reason", "Data Source"]
 st.dataframe(scanner[ranking_cols], use_container_width=True)
-st.download_button("⬇️ Download Scanner Results CSV", scanner.to_csv(index=False), "scanner_results_v24.csv", "text/csv")
+st.download_button("⬇️ Download Scanner Results CSV", scanner.to_csv(index=False), "scanner_results_v25.csv", "text/csv")
 
-st.subheader("📊 V24 Market Scanner Results")
-display_cols = ["Market", "Pair", "Display Pair", "Price", "Change %", "RSI", "EMA20", "EMA50", "Trend", "MACD", "MACD Value", "Signal", "Type", "Confidence", "Score", "Probability %", "AI Grade", "Confidence Stars", "Trade Quality", "Action Plan", "V24 Multi-Timeframe", "Entry", "Stop Loss", "Take Profit", "Data Source"]
+st.subheader("📊 V25 Market Scanner Results")
+display_cols = ["Market", "Pair", "Display Pair", "Price", "Change %", "RSI", "EMA20", "EMA50", "Trend", "MACD", "MACD Value", "Signal", "Type", "Confidence", "Score", "Probability %", "AI Grade", "Confidence Stars", "Trade Quality", "Action Plan", "V25 Multi-Timeframe", "Entry", "Stop Loss", "Take Profit", "Data Source"]
 st.dataframe(scanner[display_cols], use_container_width=True)
 
-st.subheader("🤖 V24 Machine Learning Dataset Builder")
-st.info("V24 does not trade automatically. It collects clean scanner snapshots so we can train a model later from real paper-trade outcomes.")
+st.subheader("🤖 V25 Machine Learning Dataset Builder")
+st.info("V25 does not trade automatically. It collects clean scanner snapshots so we can train a model later from real paper-trade outcomes.")
 
 m1, m2, m3, m4 = st.columns(4)
 ml_df = load_ml_dataset()
@@ -995,11 +1050,11 @@ if st.button("💾 Save Current Scanner Snapshot for ML"):
 
 if not ml_df.empty:
     st.download_button(
-        "⬇️ Download V24 ML Dataset CSV",
+        "⬇️ Download V25 ML Dataset CSV",
         ml_df.to_csv(index=False),
-        "ml_training_data_v24.csv",
+        "ml_training_data_v25.csv",
         "text/csv",
     )
     st.dataframe(ml_df.tail(50), use_container_width=True)
 
-st.warning("Paper trading only. Do not use real money yet. V24 signals are educational and must be confirmed manually on TradingView chart.")
+st.warning("Paper trading only. Do not use real money yet. V25 signals are educational and must be confirmed manually on TradingView chart.")
