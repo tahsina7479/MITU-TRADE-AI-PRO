@@ -1,7 +1,7 @@
-# MITU TRADE AI PROFESSIONAL TERMINAL V25
+# MITU TRADE AI PROFESSIONAL TERMINAL V26
 # Full app.py replacement. Paper trading only.
-# V25 upgrades: clean Apple-style layout, final trade decision near top,
-# quick sidebar signal, compact sections, improved trade quality labels.
+# V26 upgrades: ATR volatility filter, volume confirmation, support/resistance filter,
+# stronger scoring logic, richer ML dataset, and cleaner paper-trading dashboard.
 
 import os
 from datetime import datetime
@@ -16,14 +16,14 @@ try:
 except Exception:
     yf = None
 
-st.set_page_config(page_title="MITU TRADE AI V25", layout="wide")
+st.set_page_config(page_title="MITU TRADE AI V26", layout="wide")
 
-APP_VERSION = "V25"
-ML_DATA_FILE = "ml_training_data_v25.csv"
+APP_VERSION = "V26"
+ML_DATA_FILE = "ml_training_data_v26.csv"
 JOURNAL_FILE = "trade_journal.csv"
 
 SYMBOLS = [
-    # V25 LIMITED WATCHLIST: fewer instruments = better focus for paper trading.
+    # V26 LIMITED WATCHLIST: fewer instruments = better focus for paper trading.
     {"Market":"FOREX","Pair":"EURUSD=X","Display Pair":"EURUSD","Price":1.1390},
     {"Market":"FOREX","Pair":"GBPUSD=X","Display Pair":"GBPUSD","Price":1.3198},
     {"Market":"FOREX","Pair":"USDJPY=X","Display Pair":"USDJPY","Price":161.73},
@@ -95,8 +95,8 @@ def session_score_boost(market, pair, forex_session, stock_status):
     return 0, "Session not ideal"
 
 
-def v25_session_assistant(rows, ny_now, forex_session, stock_status):
-    """Return compact session guidance for the V25 sidebar."""
+def v26_session_assistant(rows, ny_now, forex_session, stock_status):
+    """Return compact session guidance for the V26 sidebar."""
     row_map = {r["Name"]: r for r in rows}
     london_open = bool(row_map.get("GB London", {}).get("Open", False))
     ny_stock_open = bool(row_map.get("US New York", {}).get("Open", False))
@@ -140,8 +140,8 @@ def v25_session_assistant(rows, ny_now, forex_session, stock_status):
     }
 
 
-def display_v25_sidebar_assistant(scanner, rows, ny_now, forex_session, stock_status):
-    info = v25_session_assistant(rows, ny_now, forex_session, stock_status)
+def display_v26_sidebar_assistant(scanner, rows, ny_now, forex_session, stock_status):
+    info = v26_session_assistant(rows, ny_now, forex_session, stock_status)
 
     st.sidebar.divider()
     st.sidebar.subheader("🎯 QUICK SIGNAL")
@@ -157,7 +157,7 @@ def display_v25_sidebar_assistant(scanner, rows, ny_now, forex_session, stock_st
             st.sidebar.info(f"{q['Display Pair']}\n\n{q['Signal']}\n\nScore: {q['Score']}\n\n{q['Trade Quality']}")
 
     st.sidebar.divider()
-    st.sidebar.subheader("🌍 V25 Session Assistant")
+    st.sidebar.subheader("🌍 V26 Session Assistant")
     st.sidebar.write(f"New York: **{ny_now.strftime('%I:%M %p')}**")
     st.sidebar.write(f"Sydney: {'🟢' if info['Sydney'] else '🔴'} | Tokyo: {'🟢' if info['Tokyo'] else '🔴'}")
     st.sidebar.write(f"London: {'🟢' if info['London'] else '🔴'} | New York: {'🟢' if info['New York'] else '🔴'}")
@@ -198,7 +198,7 @@ def display_v25_sidebar_assistant(scanner, rows, ny_now, forex_session, stock_st
     st.sidebar.divider()
     st.sidebar.subheader("🔗 OANDA Demo")
     st.sidebar.info("Status: Not connected yet")
-    st.sidebar.caption("Token পেলেই V25/V25.1-এ balance, equity, open trades দেখাবো.")
+    st.sidebar.caption("Token পেলেই V26/V26.1-এ balance, equity, open trades দেখাবো.")
 
 
 @st.cache_data(ttl=60, show_spinner=False)
@@ -232,8 +232,26 @@ def calculate_rsi(close, period=14):
     return rsi.fillna(50)
 
 
+def calculate_atr(data, period=14):
+    """Average True Range. Used as a volatility filter in V26."""
+    high = data["High"].astype(float)
+    low = data["Low"].astype(float)
+    close = data["Close"].astype(float)
+    prev_close = close.shift(1)
+    true_range = pd.concat([
+        (high - low).abs(),
+        (high - prev_close).abs(),
+        (low - prev_close).abs(),
+    ], axis=1).max(axis=1)
+    return true_range.rolling(period).mean().fillna(true_range.mean())
+
+
 def calculate_indicators(data):
     close = data["Close"].astype(float)
+    high = data["High"].astype(float) if "High" in data else close
+    low = data["Low"].astype(float) if "Low" in data else close
+    volume = data["Volume"].astype(float) if "Volume" in data else pd.Series([0] * len(data), index=data.index)
+
     last_price = float(close.iloc[-1])
     ema20 = float(ema(close, 20).iloc[-1]) if len(close) >= 20 else last_price
     ema50 = float(ema(close, 50).iloc[-1]) if len(close) >= 50 else last_price
@@ -243,8 +261,21 @@ def calculate_indicators(data):
     macd_value = float(macd_line.iloc[-1] - signal_line.iloc[-1]) if len(close) >= 35 else 0.0
     prev_close = float(close.iloc[-2]) if len(close) >= 2 else last_price
     change_pct = ((last_price - prev_close) / prev_close) * 100 if prev_close else 0
-    high_20 = float(data["High"].tail(20).max()) if "High" in data and len(data) >= 20 else last_price
-    low_20 = float(data["Low"].tail(20).min()) if "Low" in data and len(data) >= 20 else last_price
+
+    high_20 = float(high.tail(20).max()) if len(high) >= 20 else last_price
+    low_20 = float(low.tail(20).min()) if len(low) >= 20 else last_price
+    atr_series = calculate_atr(pd.DataFrame({"High": high, "Low": low, "Close": close}), 14) if len(close) >= 15 else pd.Series([0], index=[0])
+    atr = float(atr_series.iloc[-1]) if len(atr_series) else 0.0
+    atr_pct = (atr / last_price) * 100 if last_price else 0.0
+
+    current_volume = float(volume.iloc[-1]) if len(volume) else 0.0
+    avg_volume_20 = float(volume.tail(20).mean()) if len(volume) >= 20 else current_volume
+    volume_ratio = (current_volume / avg_volume_20) if avg_volume_20 and avg_volume_20 > 0 else 0.0
+    volume_spike = bool(volume_ratio >= 1.5)
+
+    distance_to_resistance_pct = ((high_20 - last_price) / last_price) * 100 if last_price else 0.0
+    distance_to_support_pct = ((last_price - low_20) / last_price) * 100 if last_price else 0.0
+
     return {
         "Price": last_price,
         "EMA20": ema20,
@@ -254,8 +285,15 @@ def calculate_indicators(data):
         "Change %": round(change_pct, 3),
         "High 20": high_20,
         "Low 20": low_20,
+        "ATR": round(atr, 6),
+        "ATR %": round(atr_pct, 4),
+        "Current Volume": round(current_volume, 2),
+        "Avg Volume 20": round(avg_volume_20, 2),
+        "Volume Ratio": round(volume_ratio, 2),
+        "Volume Spike": volume_spike,
+        "Distance Resistance %": round(distance_to_resistance_pct, 3),
+        "Distance Support %": round(distance_to_support_pct, 3),
     }
-
 
 def technical_snapshot(symbol, fallback_price, scan_timeframe, live_data):
     if not live_data:
@@ -273,7 +311,7 @@ def fallback_signal(row):
     rsi = round(35 + (seed % 35) + ((seed % 7) / 10), 2)
     trend = "UPTREND" if pair in ["AAPL", "MSFT", "USDJPY=X"] else "DOWNTREND"
     macd = "BULLISH" if pair not in ["NVDA", "GOOGL", "META"] else "BEARISH"
-    return {"Price": price, "RSI": rsi, "Trend": trend, "MACD": macd, "EMA20": np.nan, "EMA50": np.nan, "MACD Value": np.nan, "Change %": 0, "High 20": price, "Low 20": price, "Data Source":"Fallback Demo"}
+    return {"Price": price, "RSI": rsi, "Trend": trend, "MACD": macd, "EMA20": np.nan, "EMA50": np.nan, "MACD Value": np.nan, "Change %": 0, "High 20": price, "Low 20": price, "ATR": 0, "ATR %": 0, "Current Volume": 0, "Avg Volume 20": 0, "Volume Ratio": 0, "Volume Spike": False, "Distance Resistance %": 0, "Distance Support %": 0, "Data Source":"Fallback Demo"}
 
 
 def make_signal(row, scan_timeframe, live_data, forex_session, stock_status):
@@ -294,6 +332,14 @@ def make_signal(row, scan_timeframe, live_data, forex_session, stock_status):
         change_pct = base["Change %"]
         high_20 = base["High 20"]
         low_20 = base["Low 20"]
+        atr = base.get("ATR", 0)
+        atr_pct = base.get("ATR %", 0)
+        current_volume = base.get("Current Volume", 0)
+        avg_volume_20 = base.get("Avg Volume 20", 0)
+        volume_ratio = base.get("Volume Ratio", 0)
+        volume_spike = base.get("Volume Spike", False)
+        distance_resistance = base.get("Distance Resistance %", 0)
+        distance_support = base.get("Distance Support %", 0)
     else:
         price = float(tech["Price"])
         rsi = float(tech["RSI"])
@@ -303,6 +349,14 @@ def make_signal(row, scan_timeframe, live_data, forex_session, stock_status):
         change_pct = tech["Change %"]
         high_20 = tech["High 20"]
         low_20 = tech["Low 20"]
+        atr = tech.get("ATR", 0)
+        atr_pct = tech.get("ATR %", 0)
+        current_volume = tech.get("Current Volume", 0)
+        avg_volume_20 = tech.get("Avg Volume 20", 0)
+        volume_ratio = tech.get("Volume Ratio", 0)
+        volume_spike = tech.get("Volume Spike", False)
+        distance_resistance = tech.get("Distance Resistance %", 0)
+        distance_support = tech.get("Distance Support %", 0)
         trend = "UPTREND" if price > ema20 > ema50 else "DOWNTREND" if price < ema20 < ema50 else "MIXED"
         macd = "BULLISH" if macd_value > 0 else "BEARISH"
         data_source = "Yahoo Finance Live"
@@ -324,6 +378,33 @@ def make_signal(row, scan_timeframe, live_data, forex_session, stock_status):
     boost, session_reason = session_score_boost(market, pair, forex_session, stock_status)
     score += boost
 
+    # V26 accuracy filters: ATR volatility, volume spike, and support/resistance location.
+    atr_note = "ATR OK"
+    min_atr_pct = 0.03 if market in ["FOREX", "COMMODITIES"] else 0.2 if market == "CRYPTO" else 0.15
+    if live_data and atr_pct < min_atr_pct:
+        score -= 12
+        sell_score_penalty = 12
+        atr_note = "Low volatility - weak movement"
+    else:
+        sell_score_penalty = 0
+
+    volume_note = "Volume normal"
+    if live_data and volume_spike:
+        score += 8
+        volume_note = "Volume spike confirmation"
+    elif live_data and market in ["STOCKS", "CRYPTO"] and volume_ratio and volume_ratio < 0.7:
+        score -= 5
+        volume_note = "Low volume warning"
+
+    sr_note = "S/R OK"
+    near_resistance = live_data and distance_resistance <= 0.25 and distance_resistance >= 0
+    near_support = live_data and distance_support <= 0.25 and distance_support >= 0
+    if near_resistance:
+        score -= 10
+        sr_note = "BUY near resistance - caution"
+    if near_support:
+        sr_note = "SELL near support - caution"
+
     # V23 safety: avoid fake-perfect 100 scores and reduce weak extreme RSI setups.
     if rsi > 75 or rsi < 25:
         score -= 10
@@ -336,6 +417,14 @@ def make_signal(row, scan_timeframe, live_data, forex_session, stock_status):
     if macd == "BEARISH": sell_score += 30
     if rsi <= 45: sell_score += 25
     if mtf_agree and tf_5m == "SELL": sell_score += 15
+
+    # V26 sell-side support/ATR protection.
+    if 'sell_score_penalty' in locals():
+        sell_score -= sell_score_penalty
+    if near_support:
+        sell_score -= 10
+    if live_data and volume_spike:
+        sell_score += 8
 
     # V23 safety: avoid fake-perfect 100 sell scores and reduce oversold chase.
     if rsi < 25:
@@ -360,7 +449,7 @@ def make_signal(row, scan_timeframe, live_data, forex_session, stock_status):
         signal, trade_type, quality = "WAIT", "WAIT", "NEUTRAL"
         final_score = max(score, sell_score)
 
-    # V25 clean trade quality badge
+    # V26 clean trade quality badge
     if final_score >= 95:
         quality = "LEGENDARY"
     elif final_score >= 90:
@@ -387,11 +476,14 @@ def make_signal(row, scan_timeframe, live_data, forex_session, stock_status):
         sl, tp = np.nan, np.nan
 
     if final_score >= 85:
-        action = "Paper trade only after TradingView chart confirmation."
+        action = "Paper trade only after TradingView chart confirmation + V26 filters."
     elif final_score >= 65:
         action = "Watchlist only. Wait for stronger candle confirmation."
     else:
         action = "No trade now."
+
+    if (trade_type == "BUY" and near_resistance) or (trade_type == "SELL" and near_support):
+        action = "Avoid or wait: price is too close to support/resistance."
 
     return {
         **row,
@@ -403,6 +495,17 @@ def make_signal(row, scan_timeframe, live_data, forex_session, stock_status):
         "Change %": change_pct,
         "High 20": round(high_20, 5),
         "Low 20": round(low_20, 5),
+        "ATR": round(float(atr), 6) if pd.notna(atr) else 0,
+        "ATR %": round(float(atr_pct), 4) if pd.notna(atr_pct) else 0,
+        "Current Volume": round(float(current_volume), 2) if pd.notna(current_volume) else 0,
+        "Avg Volume 20": round(float(avg_volume_20), 2) if pd.notna(avg_volume_20) else 0,
+        "Volume Ratio": round(float(volume_ratio), 2) if pd.notna(volume_ratio) else 0,
+        "Volume Spike": bool(volume_spike),
+        "Distance Resistance %": round(float(distance_resistance), 3) if pd.notna(distance_resistance) else 0,
+        "Distance Support %": round(float(distance_support), 3) if pd.notna(distance_support) else 0,
+        "ATR Filter": atr_note,
+        "Volume Filter": volume_note,
+        "S/R Filter": sr_note,
         "Trend": trend,
         "MACD": macd,
         "Signal": signal,
@@ -415,7 +518,7 @@ def make_signal(row, scan_timeframe, live_data, forex_session, stock_status):
         "Risk Level": risk,
         "Trade Quality": quality,
         "Action Plan": action,
-        "V25 Multi-Timeframe": mtf_text,
+        "V26 Multi-Timeframe": mtf_text,
         "MTF Agree": mtf_agree,
         "Session Reason": session_reason,
         "Data Source": data_source,
@@ -495,6 +598,15 @@ def save_open_trade(trade, balance, risk_pct):
         "Reason":trade["Action Plan"],
         "Version":APP_VERSION,
         "Data Source":trade.get("Data Source", "Unknown"),
+        "ATR":trade.get("ATR", 0),
+        "ATR %":trade.get("ATR %", 0),
+        "Volume Spike":trade.get("Volume Spike", False),
+        "Volume Ratio":trade.get("Volume Ratio", 0),
+        "Distance Resistance %":trade.get("Distance Resistance %", 0),
+        "Distance Support %":trade.get("Distance Support %", 0),
+        "ATR Filter":trade.get("ATR Filter", ""),
+        "Volume Filter":trade.get("Volume Filter", ""),
+        "S/R Filter":trade.get("S/R Filter", ""),
     }
     old = pd.read_csv(JOURNAL_FILE) if os.path.exists(JOURNAL_FILE) else pd.DataFrame()
     pd.concat([old, pd.DataFrame([row])], ignore_index=True).to_csv(JOURNAL_FILE, index=False)
@@ -663,7 +775,9 @@ def save_ml_snapshot(scanner, scan_timeframe, forex_session, stock_status):
 
     keep_cols = [
         "Market", "Pair", "Display Pair", "Price", "Change %", "RSI", "EMA20", "EMA50",
-        "Trend", "MACD", "MACD Value", "Signal", "Type", "Confidence", "Score",
+        "Trend", "MACD", "MACD Value", "ATR", "ATR %", "Current Volume", "Avg Volume 20",
+        "Volume Ratio", "Volume Spike", "Distance Resistance %", "Distance Support %",
+        "ATR Filter", "Volume Filter", "S/R Filter", "Signal", "Type", "Confidence", "Score",
         "Probability %", "AI Grade", "Risk Level", "Trade Quality", "MTF Agree",
         "Session Reason", "Data Source", "Entry", "Stop Loss", "Take Profit"
     ]
@@ -723,7 +837,7 @@ def ml_readiness_score(dataset):
 
 
 # Sidebar controls
-st.sidebar.header("⚙️ V25 Controls")
+st.sidebar.header("⚙️ V26 Controls")
 live_data = st.sidebar.checkbox("Use Yahoo Finance Live Data", value=True)
 auto_refresh = st.sidebar.checkbox("Auto Refresh Mode")
 refresh_every = st.sidebar.selectbox("Refresh Every", [5, 15, 30, 60], index=1)
@@ -734,9 +848,9 @@ scan_timeframe = st.sidebar.selectbox("Scan Timeframe", ["5m","15m","1h","1d"], 
 if auto_refresh:
     st.sidebar.info(f"Auto refresh selected: {refresh_every} seconds. Click refresh button for manual refresh if browser does not auto-refresh.")
 
-st.title("🚀 MITU TRADE AI V25")
-st.caption("Professional AI Paper Trading Dashboard — clean, focused, paper trading only.")
-st.success("✅ V25 active: Clean final decision card + quick signal + compact dashboard")
+st.title("🚀 MITU TRADE AI V26")
+st.caption("Professional AI Paper Trading Dashboard — accuracy filters, clean UI, paper trading only.")
+st.success("✅ V26 active: ATR + Volume + Support/Resistance accuracy filters")
 
 st.markdown("""
 <style>
@@ -766,8 +880,8 @@ if show_strong:
 scanner = scanner.reset_index(drop=True)
 best = scanner.iloc[0] if not scanner.empty else None
 
-# V25 sidebar assistant is shown after scanner is built, so it can display live top setups.
-display_v25_sidebar_assistant(scanner, rows, ny_now, forex_session, stock_status)
+# V26 sidebar assistant is shown after scanner is built, so it can display live top setups.
+display_v26_sidebar_assistant(scanner, rows, ny_now, forex_session, stock_status)
 
 st.subheader("🎯 FINAL TRADE DECISION")
 if best is not None:
@@ -781,6 +895,7 @@ if best is not None:
         <h3>Score: {best['Score']} | Quality: {best['Trade Quality']} | Confidence: {best['Confidence Stars']}</h3>
         <p><b>Action:</b> {action_label} only after TradingView chart confirmation.</p>
         <p><b>Entry:</b> {best['Entry']} &nbsp; <b>SL:</b> {best['Stop Loss']} &nbsp; <b>TP:</b> {best['Take Profit']} &nbsp; <b>R/R:</b> {rr_ratio(best['Entry'], best['Stop Loss'], best['Take Profit'])}</p>
+        <p class="small-muted"><b>V26 Filters:</b> ATR {best.get('ATR %', 0)}% ({best.get('ATR Filter', '')}) | Volume x{best.get('Volume Ratio', 0)} ({best.get('Volume Filter', '')}) | S/R: {best.get('S/R Filter', '')}</p>
     </div>
     """
     st.markdown(card_html, unsafe_allow_html=True)
@@ -788,7 +903,7 @@ else:
     size = 0
     st.warning("No scanner results found. Try ALL focus mode or turn off strong-only filter.")
 
-st.subheader("🌍 World Market Clock + Session Status V25")
+st.subheader("🌍 World Market Clock + Session Status V26")
 for col, row in zip(st.columns(4), rows):
     with col:
         st.caption(row["Name"])
@@ -803,15 +918,15 @@ c2.metric("Forex Session", forex_session)
 c3.metric("Stocks", stock_status)
 c4.metric("Scan Timeframe", scan_timeframe)
 
-st.subheader("⚡ V25 AI Market Priority")
+st.subheader("⚡ V26 AI Market Priority")
 p1, p2, p3, p4 = st.columns(4)
 p1.metric("Forex Priority", "High" if forex_session != "Quiet / Watchlist" else "Watchlist")
 p2.metric("Gold Priority", "High" if forex_session in ["London session", "New York session"] else "Medium")
 p3.metric("Crypto Priority", "24/7 Active")
 p4.metric("Stocks Priority", "Active" if stock_status == "Stocks open" else "Closed / Watchlist")
-st.caption("V25 rule: paper trading only. Use session timing + score guide + TradingView chart confirmation before opening any trade.")
+st.caption("V26 rule: paper trading only. Use session timing + score guide + TradingView chart confirmation before opening any trade.")
 
-st.subheader("📰 V25 News Risk Reminder")
+st.subheader("📰 V26 News Risk Reminder")
 n1, n2, n3, n4 = st.columns(4)
 n1.metric("USD News Risk", "Check Calendar")
 n2.metric("Gold News Risk", "USD Sensitive")
@@ -819,13 +934,13 @@ n3.metric("Forex News Risk", "Medium")
 n4.metric("Crypto News Risk", "24/7 Volatile")
 st.warning("Before paper trading, check high-impact news: CPI, NFP, FOMC, interest rates, GDP, unemployment.")
 
-st.subheader("🧠 V25 Signal Engine")
+st.subheader("🧠 V26 Signal Engine")
 e1, e2, e3, e4 = st.columns(4)
 e1.metric("Trend Filter", "EMA 20/50")
-e2.metric("Momentum Filter", "RSI + MACD")
-e3.metric("MTF Check", "5m / 15m / 1h")
+e2.metric("Momentum", "RSI + MACD")
+e3.metric("V26 Filters", "ATR + Volume + S/R")
 e4.metric("Data", "Yahoo Live" if live_data and yf is not None else "Fallback Demo")
-st.info("V25 uses live candles when yfinance works. If Yahoo data fails, it safely falls back to demo prices.")
+st.info("V26 uses live candles with ATR, volume, and support/resistance filters. If Yahoo data fails, it safely falls back to demo prices.")
 
 st.write("Total symbols in list:", len(SYMBOLS))
 st.write("Total results found:", len(scanner))
@@ -853,7 +968,10 @@ Risk/Reward: {rr_ratio(best['Entry'], best['Stop Loss'], best['Take Profit'])}
 Risk Amount: ${risk_amount}
 Position Size: {size}
 Position Value: ${value}
-Multi-Timeframe: {best['V25 Multi-Timeframe']}"""
+ATR: {best.get('ATR', 0)} | ATR %: {best.get('ATR %', 0)} | ATR Filter: {best.get('ATR Filter', '')}
+Volume Ratio: {best.get('Volume Ratio', 0)} | Volume Spike: {best.get('Volume Spike', False)} | Volume Filter: {best.get('Volume Filter', '')}
+Distance to Resistance %: {best.get('Distance Resistance %', 0)} | Distance to Support %: {best.get('Distance Support %', 0)} | S/R Filter: {best.get('S/R Filter', '')}
+Multi-Timeframe: {best['V26 Multi-Timeframe']}"""
     st.success(best_text)
 
     st.subheader("🧠 AI Analyst Explanation")
@@ -863,8 +981,9 @@ Multi-Timeframe: {best['V25 Multi-Timeframe']}"""
         f"Score: {best['Score']} | Probability: {best['Probability %']}% | Grade: {best['AI Grade']}\n"
         f"Risk Level: {best['Risk Level']} | Trade Quality: {best['Trade Quality']}\n"
         f"Action Plan: {best['Action Plan']}\n"
-        f"Multi-Timeframe: {best['V25 Multi-Timeframe']}\n"
+        f"Multi-Timeframe: {best['V26 Multi-Timeframe']}\n"
         f"Technical Reason: EMA trend {best['Trend']}. MACD {best['MACD']} ({best['MACD Value']}). RSI {best['RSI']}. "
+        f"V26 Filters: ATR {best.get('ATR %', 0)}% / {best.get('ATR Filter', '')}; Volume x{best.get('Volume Ratio', 0)} / {best.get('Volume Filter', '')}; S/R {best.get('S/R Filter', '')}. "
         f"Session reason: {best['Session Reason']}. Data source: {best['Data Source']}."
     )
 else:
@@ -891,7 +1010,7 @@ for market in markets:
         st.info("No results")
     for _, r in mdf.iterrows():
         color = "🟢" if r["Score"] >= 85 else "🟡" if r["Score"] >= 65 else "🔵"
-        st.write(f"{color} {r['Pair']} | {r['Signal']} | Score: {r['Score']} | Probability: {r['Probability %']}% | Grade: {r['AI Grade']} | Risk: {r['Risk Level']} | Entry: {r['Entry']} | SL: {r['Stop Loss']} | TP: {r['Take Profit']} | MTF: {r['V25 Multi-Timeframe']} | Source: {r['Data Source']}")
+        st.write(f"{color} {r['Pair']} | {r['Signal']} | Score: {r['Score']} | Probability: {r['Probability %']}% | Grade: {r['AI Grade']} | Risk: {r['Risk Level']} | Entry: {r['Entry']} | SL: {r['Stop Loss']} | TP: {r['Take Profit']} | MTF: {r['V26 Multi-Timeframe']} | ATR: {r.get('ATR %', 0)}% | Vol x{r.get('Volume Ratio', 0)} | S/R: {r.get('S/R Filter', '')} | Source: {r['Data Source']}")
 
 st.subheader("💾 Open Best Trade in Journal")
 if best is not None and st.button("Open Overall Best Trade"):
@@ -931,7 +1050,7 @@ if os.path.exists(JOURNAL_FILE):
     journal = pd.read_csv(JOURNAL_FILE)
     st.write("Journal rows:", len(journal))
     st.dataframe(journal, use_container_width=True)
-    st.download_button("⬇️ Download Trade Journal CSV", journal.to_csv(index=False), "trade_journal_v25.csv", "text/csv")
+    st.download_button("⬇️ Download Trade Journal CSV", journal.to_csv(index=False), "trade_journal_v26.csv", "text/csv")
     closed = journal[journal["Status"] == "CLOSED"] if "Status" in journal.columns else pd.DataFrame()
     st.subheader("📊 Journal Win Rate")
     j1, j2, j3, j4 = st.columns(4)
@@ -983,7 +1102,7 @@ for market in markets:
     c2.metric("Bearish", len(mdf[mdf["Signal"].isin(["STRONG SELL", "SELL WATCH"])]))
     c3.metric("Neutral / Mixed", len(mdf[mdf["Signal"] == "WAIT"]))
 
-st.subheader("🧪 V25 Realistic Backtest Panel")
+st.subheader("🧪 V26 Realistic Backtest Panel")
 backtest = build_realistic_backtest(scanner, scan_timeframe, live_data)
 
 if not backtest.empty:
@@ -1018,17 +1137,17 @@ if not backtest.empty:
 else:
     st.info("No backtest data available.")
 
-st.subheader("📌 V25 Market Strength Ranking")
-ranking_cols = ["Market", "Confidence Stars", "Pair", "Display Pair", "Signal", "Score", "Probability %", "AI Grade", "Risk Level", "Trade Quality", "Action Plan", "V25 Multi-Timeframe", "Session Reason", "Data Source"]
+st.subheader("📌 V26 Market Strength Ranking")
+ranking_cols = ["Market", "Confidence Stars", "Pair", "Display Pair", "Signal", "Score", "Probability %", "AI Grade", "Risk Level", "Trade Quality", "ATR %", "Volume Ratio", "Volume Spike", "S/R Filter", "Action Plan", "V26 Multi-Timeframe", "Session Reason", "Data Source"]
 st.dataframe(scanner[ranking_cols], use_container_width=True)
-st.download_button("⬇️ Download Scanner Results CSV", scanner.to_csv(index=False), "scanner_results_v25.csv", "text/csv")
+st.download_button("⬇️ Download Scanner Results CSV", scanner.to_csv(index=False), "scanner_results_v26.csv", "text/csv")
 
-st.subheader("📊 V25 Market Scanner Results")
-display_cols = ["Market", "Pair", "Display Pair", "Price", "Change %", "RSI", "EMA20", "EMA50", "Trend", "MACD", "MACD Value", "Signal", "Type", "Confidence", "Score", "Probability %", "AI Grade", "Confidence Stars", "Trade Quality", "Action Plan", "V25 Multi-Timeframe", "Entry", "Stop Loss", "Take Profit", "Data Source"]
+st.subheader("📊 V26 Market Scanner Results")
+display_cols = ["Market", "Pair", "Display Pair", "Price", "Change %", "RSI", "EMA20", "EMA50", "Trend", "MACD", "MACD Value", "ATR", "ATR %", "Current Volume", "Volume Ratio", "Volume Spike", "Distance Resistance %", "Distance Support %", "ATR Filter", "Volume Filter", "S/R Filter", "Signal", "Type", "Confidence", "Score", "Probability %", "AI Grade", "Confidence Stars", "Trade Quality", "Action Plan", "V26 Multi-Timeframe", "Entry", "Stop Loss", "Take Profit", "Data Source"]
 st.dataframe(scanner[display_cols], use_container_width=True)
 
-st.subheader("🤖 V25 Machine Learning Dataset Builder")
-st.info("V25 does not trade automatically. It collects clean scanner snapshots so we can train a model later from real paper-trade outcomes.")
+st.subheader("🤖 V26 Machine Learning Dataset Builder")
+st.info("V26 does not trade automatically. It collects ATR, volume, and support/resistance features so we can train a better model later from paper-trade outcomes.")
 
 m1, m2, m3, m4 = st.columns(4)
 ml_df = load_ml_dataset()
@@ -1050,11 +1169,11 @@ if st.button("💾 Save Current Scanner Snapshot for ML"):
 
 if not ml_df.empty:
     st.download_button(
-        "⬇️ Download V25 ML Dataset CSV",
+        "⬇️ Download V26 ML Dataset CSV",
         ml_df.to_csv(index=False),
-        "ml_training_data_v25.csv",
+        "ml_training_data_v26.csv",
         "text/csv",
     )
     st.dataframe(ml_df.tail(50), use_container_width=True)
 
-st.warning("Paper trading only. Do not use real money yet. V25 signals are educational and must be confirmed manually on TradingView chart.")
+st.warning("Paper trading only. Do not use real money yet. V26 signals are educational and must be confirmed manually on TradingView chart.")
