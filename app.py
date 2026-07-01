@@ -1,4 +1,4 @@
-# MITU TRADE AI PROFESSIONAL TERMINAL V26
+# MITU TRADE AI PROFESSIONAL TERMINAL V27
 # Full app.py replacement. Paper trading only.
 # V26 upgrades: ATR volatility filter, volume confirmation, support/resistance filter,
 # stronger scoring logic, richer ML dataset, and cleaner paper-trading dashboard.
@@ -16,10 +16,15 @@ try:
 except Exception:
     yf = None
 
-st.set_page_config(page_title="MITU TRADE AI V26", layout="wide")
+try:
+    import requests
+except Exception:
+    requests = None
 
-APP_VERSION = "V26"
-ML_DATA_FILE = "ml_training_data_v26.csv"
+st.set_page_config(page_title="MITU TRADE AI V27", layout="wide")
+
+APP_VERSION = "V27"
+ML_DATA_FILE = "ml_training_data_v27.csv"
 JOURNAL_FILE = "trade_journal.csv"
 
 SYMBOLS = [
@@ -43,6 +48,133 @@ TIMEFRAME_MAP = {
     "1h": {"interval":"1h", "period":"1mo"},
     "1d": {"interval":"1d", "period":"6mo"},
 }
+
+
+# -----------------------------
+# V27 OANDA DEMO CONNECTION
+# -----------------------------
+OANDA_PRACTICE_URL = "https://api-fxpractice.oanda.com/v3"
+OANDA_LIVE_URL = "https://api-fxtrade.oanda.com/v3"
+DEFAULT_OANDA_ACCOUNT_ID = "101-001-37834127-001"
+
+
+def get_oanda_base_url(environment):
+    """Return OANDA REST base URL. Use PRACTICE for demo account."""
+    return OANDA_LIVE_URL if environment == "LIVE" else OANDA_PRACTICE_URL
+
+
+def safe_float(value, default=0.0):
+    try:
+        return float(value)
+    except Exception:
+        return default
+
+
+@st.cache_data(ttl=20, show_spinner=False)
+def fetch_oanda_account_summary(account_id, token, environment):
+    """Fetch OANDA account summary. Token is never saved by this app."""
+    if requests is None:
+        return False, {"error": "requests package is not installed. Run: pip install requests"}
+    if not account_id or not token:
+        return False, {"error": "Account ID and token are required."}
+
+    url = f"{get_oanda_base_url(environment)}/accounts/{account_id}/summary"
+    headers = {"Authorization": f"Bearer {token}"}
+
+    try:
+        response = requests.get(url, headers=headers, timeout=12)
+        if response.status_code != 200:
+            return False, {
+                "error": f"OANDA error {response.status_code}",
+                "details": response.text[:500],
+            }
+        return True, response.json().get("account", {})
+    except Exception as exc:
+        return False, {"error": str(exc)}
+
+
+@st.cache_data(ttl=20, show_spinner=False)
+def fetch_oanda_open_positions(account_id, token, environment):
+    """Fetch OANDA open positions from demo/live account."""
+    if requests is None:
+        return False, pd.DataFrame(), "requests package is not installed. Run: pip install requests"
+    if not account_id or not token:
+        return False, pd.DataFrame(), "Account ID and token are required."
+
+    url = f"{get_oanda_base_url(environment)}/accounts/{account_id}/openPositions"
+    headers = {"Authorization": f"Bearer {token}"}
+
+    try:
+        response = requests.get(url, headers=headers, timeout=12)
+        if response.status_code != 200:
+            return False, pd.DataFrame(), f"OANDA error {response.status_code}: {response.text[:300]}"
+        positions = response.json().get("positions", [])
+        rows = []
+        for pos in positions:
+            long_units = safe_float(pos.get("long", {}).get("units", 0))
+            short_units = safe_float(pos.get("short", {}).get("units", 0))
+            rows.append({
+                "Instrument": pos.get("instrument", ""),
+                "Long Units": long_units,
+                "Short Units": short_units,
+                "Net Units": long_units + short_units,
+                "Unrealized P/L": safe_float(pos.get("unrealizedPL", 0)),
+                "Margin Used": safe_float(pos.get("marginUsed", 0)),
+            })
+        return True, pd.DataFrame(rows), "OK"
+    except Exception as exc:
+        return False, pd.DataFrame(), str(exc)
+
+
+def display_oanda_status_panel(account_id, token, environment):
+    """Display OANDA connection status and account summary in the main dashboard."""
+    st.subheader("🔗 OANDA Demo Connection")
+
+    if not token:
+        st.warning("OANDA token not entered yet. Paste it in the sidebar password box only. Do not save token inside code.")
+        st.caption("Security rule: API token is used only during this Streamlit session.")
+        return None, pd.DataFrame()
+
+    ok, account = fetch_oanda_account_summary(account_id, token, environment)
+    if not ok:
+        st.error("OANDA connection failed.")
+        st.code(account.get("error", "Unknown error"))
+        details = account.get("details")
+        if details:
+            st.caption(details)
+        return None, pd.DataFrame()
+
+    currency = account.get("currency", "USD")
+    balance_val = safe_float(account.get("balance", 0))
+    nav_val = safe_float(account.get("NAV", 0))
+    unrealized_val = safe_float(account.get("unrealizedPL", 0))
+    margin_used_val = safe_float(account.get("marginUsed", 0))
+    open_trade_count = account.get("openTradeCount", 0)
+    open_position_count = account.get("openPositionCount", 0)
+
+    st.success("✅ OANDA connected successfully")
+    oc1, oc2, oc3, oc4 = st.columns(4)
+    oc1.metric("OANDA Balance", f"{balance_val:,.2f} {currency}")
+    oc2.metric("NAV / Equity", f"{nav_val:,.2f} {currency}")
+    oc3.metric("Unrealized P/L", f"{unrealized_val:,.2f} {currency}")
+    oc4.metric("Open Trades", open_trade_count)
+
+    oc5, oc6, oc7, oc8 = st.columns(4)
+    oc5.metric("Open Positions", open_position_count)
+    oc6.metric("Margin Used", f"{margin_used_val:,.2f} {currency}")
+    oc7.metric("Environment", environment)
+    oc8.metric("Account ID", account_id)
+
+    pos_ok, positions_df, msg = fetch_oanda_open_positions(account_id, token, environment)
+    with st.expander("📌 OANDA Open Positions", expanded=False):
+        if pos_ok and not positions_df.empty:
+            st.dataframe(positions_df, use_container_width=True)
+        elif pos_ok:
+            st.info("No open OANDA positions right now.")
+        else:
+            st.warning(msg)
+
+    return account, positions_df
 
 
 def market_session_status():
@@ -157,7 +289,7 @@ def display_v26_sidebar_assistant(scanner, rows, ny_now, forex_session, stock_st
             st.sidebar.info(f"{q['Display Pair']}\n\n{q['Signal']}\n\nScore: {q['Score']}\n\n{q['Trade Quality']}")
 
     st.sidebar.divider()
-    st.sidebar.subheader("🌍 V26 Session Assistant")
+    st.sidebar.subheader("🌍 V27 Session Assistant")
     st.sidebar.write(f"New York: **{ny_now.strftime('%I:%M %p')}**")
     st.sidebar.write(f"Sydney: {'🟢' if info['Sydney'] else '🔴'} | Tokyo: {'🟢' if info['Tokyo'] else '🔴'}")
     st.sidebar.write(f"London: {'🟢' if info['London'] else '🔴'} | New York: {'🟢' if info['New York'] else '🔴'}")
@@ -197,8 +329,8 @@ def display_v26_sidebar_assistant(scanner, rows, ny_now, forex_session, stock_st
 
     st.sidebar.divider()
     st.sidebar.subheader("🔗 OANDA Demo")
-    st.sidebar.info("Status: Not connected yet")
-    st.sidebar.caption("Token পেলেই V26/V26.1-এ balance, equity, open trades দেখাবো.")
+    st.sidebar.info("Use the OANDA Connection section in sidebar controls below.")
+    st.sidebar.caption("V27: balance, equity, open positions দেখাবে after token entry.")
 
 
 @st.cache_data(ttl=60, show_spinner=False)
@@ -837,7 +969,7 @@ def ml_readiness_score(dataset):
 
 
 # Sidebar controls
-st.sidebar.header("⚙️ V26 Controls")
+st.sidebar.header("⚙️ V27 Controls")
 live_data = st.sidebar.checkbox("Use Yahoo Finance Live Data", value=True)
 auto_refresh = st.sidebar.checkbox("Auto Refresh Mode")
 refresh_every = st.sidebar.selectbox("Refresh Every", [5, 15, 30, 60], index=1)
@@ -845,12 +977,21 @@ focus_mode = st.sidebar.selectbox("Focus Mode", ["ALL","FOREX","COMMODITIES","CR
 show_strong = st.sidebar.checkbox("Show only strong opportunities")
 scan_timeframe = st.sidebar.selectbox("Scan Timeframe", ["5m","15m","1h","1d"], index=1)
 
+st.sidebar.divider()
+st.sidebar.subheader("🔗 OANDA Connection")
+oanda_environment = st.sidebar.selectbox("OANDA Environment", ["PRACTICE", "LIVE"], index=0)
+oanda_account_id = st.sidebar.text_input("OANDA Account ID", value=DEFAULT_OANDA_ACCOUNT_ID)
+oanda_token = st.sidebar.text_input("OANDA API Token", type="password", help="Paste token here only. Do not paste it in chat and do not hardcode it in the Python file.")
+connect_oanda = st.sidebar.checkbox("Connect OANDA Demo", value=False)
+if oanda_environment == "LIVE":
+    st.sidebar.error("LIVE selected. Use PRACTICE for paper trading.")
+
 if auto_refresh:
     st.sidebar.info(f"Auto refresh selected: {refresh_every} seconds. Click refresh button for manual refresh if browser does not auto-refresh.")
 
-st.title("🚀 MITU TRADE AI V26")
-st.caption("Professional AI Paper Trading Dashboard — accuracy filters, clean UI, paper trading only.")
-st.success("✅ V26 active: ATR + Volume + Support/Resistance accuracy filters")
+st.title("🚀 MITU TRADE AI V27")
+st.caption("Professional AI Paper Trading Dashboard — OANDA demo connected, accuracy filters, paper trading only.")
+st.success("✅ V27 active: OANDA demo connection + V26 accuracy filters")
 
 st.markdown("""
 <style>
@@ -865,7 +1006,16 @@ div[data-testid="stMetric"] {background: rgba(250,250,250,0.04); border: 1px sol
 if yf is None and live_data:
     st.error("yfinance is not installed. Run this in terminal: pip install yfinance")
 
-balance = st.number_input("Starting Paper Account Balance ($)", min_value=100.0, value=1000.0, step=100.0)
+# OANDA account summary appears near the top only when you turn on Connect OANDA Demo.
+oanda_account = None
+oanda_positions = pd.DataFrame()
+if connect_oanda:
+    oanda_account, oanda_positions = display_oanda_status_panel(oanda_account_id, oanda_token, oanda_environment)
+else:
+    st.info("🔗 OANDA is ready. Turn on 'Connect OANDA Demo' in the sidebar and paste your token in the password box to view live demo balance.")
+
+balance_default = safe_float(oanda_account.get("balance", 1000.0), 1000.0) if isinstance(oanda_account, dict) else 1000.0
+balance = st.number_input("Starting Paper Account Balance ($)", min_value=100.0, value=float(balance_default), step=100.0)
 risk_pct = st.number_input("Risk Per Trade (%)", min_value=0.1, max_value=10.0, value=2.0, step=0.1)
 if st.button("🔄 Refresh Market Data"):
     st.cache_data.clear()
@@ -893,9 +1043,9 @@ if best is not None:
         <h1>{best['Display Pair']} — {best['Signal']}</h1>
         <p class="small-muted">Market: {best['Market']} | Data: {best['Data Source']} | Session: {best['Session Reason']}</p>
         <h3>Score: {best['Score']} | Quality: {best['Trade Quality']} | Confidence: {best['Confidence Stars']}</h3>
-        <p><b>Action:</b> {action_label} only after TradingView chart confirmation.</p>
+        <p><b>Action:</b> {action_label} only after manual confirmation.</p>
         <p><b>Entry:</b> {best['Entry']} &nbsp; <b>SL:</b> {best['Stop Loss']} &nbsp; <b>TP:</b> {best['Take Profit']} &nbsp; <b>R/R:</b> {rr_ratio(best['Entry'], best['Stop Loss'], best['Take Profit'])}</p>
-        <p class="small-muted"><b>V26 Filters:</b> ATR {best.get('ATR %', 0)}% ({best.get('ATR Filter', '')}) | Volume x{best.get('Volume Ratio', 0)} ({best.get('Volume Filter', '')}) | S/R: {best.get('S/R Filter', '')}</p>
+        <p class="small-muted"><b>V27 Filters:</b> ATR {best.get('ATR %', 0)}% ({best.get('ATR Filter', '')}) | Volume x{best.get('Volume Ratio', 0)} ({best.get('Volume Filter', '')}) | S/R: {best.get('S/R Filter', '')}</p>
     </div>
     """
     st.markdown(card_html, unsafe_allow_html=True)
@@ -918,15 +1068,15 @@ c2.metric("Forex Session", forex_session)
 c3.metric("Stocks", stock_status)
 c4.metric("Scan Timeframe", scan_timeframe)
 
-st.subheader("⚡ V26 AI Market Priority")
+st.subheader("⚡ V27 AI Market Priority")
 p1, p2, p3, p4 = st.columns(4)
 p1.metric("Forex Priority", "High" if forex_session != "Quiet / Watchlist" else "Watchlist")
 p2.metric("Gold Priority", "High" if forex_session in ["London session", "New York session"] else "Medium")
 p3.metric("Crypto Priority", "24/7 Active")
 p4.metric("Stocks Priority", "Active" if stock_status == "Stocks open" else "Closed / Watchlist")
-st.caption("V26 rule: paper trading only. Use session timing + score guide + TradingView chart confirmation before opening any trade.")
+st.caption("V27 rule: paper trading only. Use session timing + score guide + TradingView chart confirmation before opening any trade.")
 
-st.subheader("📰 V26 News Risk Reminder")
+st.subheader("📰 V27 News Risk Reminder")
 n1, n2, n3, n4 = st.columns(4)
 n1.metric("USD News Risk", "Check Calendar")
 n2.metric("Gold News Risk", "USD Sensitive")
@@ -934,13 +1084,13 @@ n3.metric("Forex News Risk", "Medium")
 n4.metric("Crypto News Risk", "24/7 Volatile")
 st.warning("Before paper trading, check high-impact news: CPI, NFP, FOMC, interest rates, GDP, unemployment.")
 
-st.subheader("🧠 V26 Signal Engine")
+st.subheader("🧠 V27 Signal Engine")
 e1, e2, e3, e4 = st.columns(4)
 e1.metric("Trend Filter", "EMA 20/50")
 e2.metric("Momentum", "RSI + MACD")
-e3.metric("V26 Filters", "ATR + Volume + S/R")
+e3.metric("V27 Filters", "ATR + Volume + S/R")
 e4.metric("Data", "Yahoo Live" if live_data and yf is not None else "Fallback Demo")
-st.info("V26 uses live candles with ATR, volume, and support/resistance filters. If Yahoo data fails, it safely falls back to demo prices.")
+st.info("V27 uses live candles with ATR, volume, and support/resistance filters. If Yahoo data fails, it safely falls back to demo prices.")
 
 st.write("Total symbols in list:", len(SYMBOLS))
 st.write("Total results found:", len(scanner))
@@ -983,7 +1133,7 @@ Multi-Timeframe: {best['V26 Multi-Timeframe']}"""
         f"Action Plan: {best['Action Plan']}\n"
         f"Multi-Timeframe: {best['V26 Multi-Timeframe']}\n"
         f"Technical Reason: EMA trend {best['Trend']}. MACD {best['MACD']} ({best['MACD Value']}). RSI {best['RSI']}. "
-        f"V26 Filters: ATR {best.get('ATR %', 0)}% / {best.get('ATR Filter', '')}; Volume x{best.get('Volume Ratio', 0)} / {best.get('Volume Filter', '')}; S/R {best.get('S/R Filter', '')}. "
+        f"V27 Filters: ATR {best.get('ATR %', 0)}% / {best.get('ATR Filter', '')}; Volume x{best.get('Volume Ratio', 0)} / {best.get('Volume Filter', '')}; S/R {best.get('S/R Filter', '')}. "
         f"Session reason: {best['Session Reason']}. Data source: {best['Data Source']}."
     )
 else:
@@ -1050,7 +1200,7 @@ if os.path.exists(JOURNAL_FILE):
     journal = pd.read_csv(JOURNAL_FILE)
     st.write("Journal rows:", len(journal))
     st.dataframe(journal, use_container_width=True)
-    st.download_button("⬇️ Download Trade Journal CSV", journal.to_csv(index=False), "trade_journal_v26.csv", "text/csv")
+    st.download_button("⬇️ Download Trade Journal CSV", journal.to_csv(index=False), "trade_journal_v27.csv", "text/csv")
     closed = journal[journal["Status"] == "CLOSED"] if "Status" in journal.columns else pd.DataFrame()
     st.subheader("📊 Journal Win Rate")
     j1, j2, j3, j4 = st.columns(4)
@@ -1102,7 +1252,7 @@ for market in markets:
     c2.metric("Bearish", len(mdf[mdf["Signal"].isin(["STRONG SELL", "SELL WATCH"])]))
     c3.metric("Neutral / Mixed", len(mdf[mdf["Signal"] == "WAIT"]))
 
-st.subheader("🧪 V26 Realistic Backtest Panel")
+st.subheader("🧪 V27 Realistic Backtest Panel")
 backtest = build_realistic_backtest(scanner, scan_timeframe, live_data)
 
 if not backtest.empty:
@@ -1137,16 +1287,16 @@ if not backtest.empty:
 else:
     st.info("No backtest data available.")
 
-st.subheader("📌 V26 Market Strength Ranking")
+st.subheader("📌 V27 Market Strength Ranking")
 ranking_cols = ["Market", "Confidence Stars", "Pair", "Display Pair", "Signal", "Score", "Probability %", "AI Grade", "Risk Level", "Trade Quality", "ATR %", "Volume Ratio", "Volume Spike", "S/R Filter", "Action Plan", "V26 Multi-Timeframe", "Session Reason", "Data Source"]
 st.dataframe(scanner[ranking_cols], use_container_width=True)
-st.download_button("⬇️ Download Scanner Results CSV", scanner.to_csv(index=False), "scanner_results_v26.csv", "text/csv")
+st.download_button("⬇️ Download Scanner Results CSV", scanner.to_csv(index=False), "scanner_results_v27.csv", "text/csv")
 
-st.subheader("📊 V26 Market Scanner Results")
+st.subheader("📊 V27 Market Scanner Results")
 display_cols = ["Market", "Pair", "Display Pair", "Price", "Change %", "RSI", "EMA20", "EMA50", "Trend", "MACD", "MACD Value", "ATR", "ATR %", "Current Volume", "Volume Ratio", "Volume Spike", "Distance Resistance %", "Distance Support %", "ATR Filter", "Volume Filter", "S/R Filter", "Signal", "Type", "Confidence", "Score", "Probability %", "AI Grade", "Confidence Stars", "Trade Quality", "Action Plan", "V26 Multi-Timeframe", "Entry", "Stop Loss", "Take Profit", "Data Source"]
 st.dataframe(scanner[display_cols], use_container_width=True)
 
-st.subheader("🤖 V26 Machine Learning Dataset Builder")
+st.subheader("🤖 V27 Machine Learning Dataset Builder")
 st.info("V26 does not trade automatically. It collects ATR, volume, and support/resistance features so we can train a better model later from paper-trade outcomes.")
 
 m1, m2, m3, m4 = st.columns(4)
@@ -1171,9 +1321,9 @@ if not ml_df.empty:
     st.download_button(
         "⬇️ Download V26 ML Dataset CSV",
         ml_df.to_csv(index=False),
-        "ml_training_data_v26.csv",
+        "ml_training_data_v27.csv",
         "text/csv",
     )
     st.dataframe(ml_df.tail(50), use_container_width=True)
 
-st.warning("Paper trading only. Do not use real money yet. V26 signals are educational and must be confirmed manually on TradingView chart.")
+st.warning("Paper trading only. Do not use real money yet. V26 signals are educational and must be confirmed manually before any trade.")
